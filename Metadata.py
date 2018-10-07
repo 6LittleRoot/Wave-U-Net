@@ -1,7 +1,11 @@
 import librosa
 import os, re, subprocess
-from soundfile import SoundFile
-import scikits.audiolab
+if False:
+    from soundfile import SoundFile
+    import scikits.audiolab
+else:
+    from pysndfile import sndio
+
 import Utils
 
 class AudioReadError(EnvironmentError):
@@ -70,17 +74,25 @@ def get_audio_metadata(audioPath, sphereType=False):
     :return: 
     '''
     ext = os.path.splitext(audioPath)[1][1:].lower()
-    if ext=="aiff" or sphereType:  # SPHERE headers for the TIMIT dataset
-        audio = scikits.audiolab.Sndfile(audioPath)
-        sr = audio.samplerate
-        channels = audio.channels
-        duration = float(audio.nframes) / float(audio.samplerate)
-    elif ext=="mp3": # Use ffmpeg/ffprobe
-        sr, channels, duration = get_mp3_metadata(audioPath)
+    if False:
+        if ext=="aiff" or sphereType:  # SPHERE headers for the TIMIT dataset
+            audio = scikits.audiolab.Sndfile(audioPath)
+            sr = audio.samplerate
+            channels = audio.channels
+            duration = float(audio.nframes) / float(audio.samplerate)
+        elif ext=="mp3": # Use ffmpeg/ffprobe
+            sr, channels, duration = get_mp3_metadata(audioPath)
+        else:
+            snd_file = SoundFile(audioPath, mode='r')
+            inf = snd_file._info
+            sr = inf.samplerate
+            channels = inf.channels
+            duration = float(inf.frames) / float(inf.samplerate)
     else:
-        snd_file = SoundFile(audioPath, mode='r')
-        inf = snd_file._info
-        sr = inf.samplerate
-        channels = inf.channels
-        duration = float(inf.frames) / float(inf.samplerate)
+        if ext=="mp3": # Use ffmpeg/ffprobe
+            sr, channels, duration = get_mp3_metadata(audioPath)
+        else:
+            sr, _, _, channels, num_frames =  sndio.get_info(audioPath, extended_info=True)
+            duration = num_frames/ sr
+
     return int(sr), int(channels), float(duration)

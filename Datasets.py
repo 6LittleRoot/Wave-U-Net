@@ -8,7 +8,8 @@ import csv
 import numpy as np
 from lxml import etree
 import librosa
-import soundfile
+#import soundfile
+from pysndfile import sndio
 import os
 import fnmatch
 from exceptions import Exception
@@ -113,7 +114,8 @@ def convert_float_to_pcm(float_audio):
 
 def write_wav_skip_existing(path, y, sr):
     if not os.path.exists(path):
-        soundfile.write(path, y, sr, "PCM_16")
+        sndio.write(path, data=y, rate=sr, format="wav", enc='pcm16')
+        #soundfile.write(path, y, sr, "PCM_16")
     else:
         print("WARNING: Tried writing audio to " + path + ", but audio file exists already. Skipping file!")
     return Sample.from_array(path, y, sr)
