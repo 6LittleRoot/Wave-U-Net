@@ -1,4 +1,5 @@
-import os.path
+import os
+import sys
 
 import Input.Input
 import Utils
@@ -12,8 +13,14 @@ import librosa
 from pysndfile import sndio
 import os
 import fnmatch
-from exceptions import Exception
+# from exceptions import Exception
 import musdb
+
+# global shared memory for multi processing
+from multiprocessing import  Value, Pool
+
+# progress indicator when retrieving musdb
+_map_process_progress = Value('i',0)
 
 
 def subtract_audio(mix_list, instrument_list):
@@ -114,59 +121,186 @@ def convert_float_to_pcm(float_audio):
 
 def write_wav_skip_existing(path, y, sr):
     if not os.path.exists(path):
+        if not os.path.exists(os.path.dirname(path)):
+            os.makedirs(os.path.dirname(path), exists_ok =True)
         sndio.write(path, data=y, rate=sr, format="wav", enc='pcm16')
         #soundfile.write(path, y, sr, "PCM_16")
     else:
         print("WARNING: Tried writing audio to " + path + ", but audio file exists already. Skipping file!")
     return Sample.from_array(path, y, sr)
 
-def getMUSDB(database_path):
-    mus = musdb.DB(root_dir=database_path, is_wav=False)
+
+def process_track(track__is_wav_tuple):
+
+    track, is_wav = track__is_wav_tuple
+    rate = track.rate
+    # Get mix and instruments
+    # Bass
+    bass_audio = track.targets["bass"].audio
+    if is_wav:
+        bass_path = track.targets["bass"].sources[0]
+        bass = Sample.from_array(bass_path, bass_audio, rate)
+    else:
+        bass_path = track.path[:-4] + "_bass.wav"
+        bass = write_wav_skip_existing(bass_path, bass_audio, rate)
+
+    # Drums
+    drums_audio = track.targets["drums"].audio
+    if is_wav:
+        drums_path = track.targets["drums"].sources[0]
+        drums = Sample.from_array(drums_path, drums_audio, rate)
+    else:
+        drums_path = track.path[:-4] + "_drums.wav"
+        drums = write_wav_skip_existing(drums_path, drums_audio, rate)
+
+    # Other
+    other_audio = track.targets["other"].audio
+    if is_wav:
+        other_path = track.targets["other"].sources[0]
+        other = Sample.from_array(other_path, other_audio, rate)
+    else:
+        other_path = track.path[:-4] + "_other.wav"
+        other = write_wav_skip_existing(other_path, other_audio, rate)
+
+    # Vocals
+    vocal_audio = track.targets["vocals"].audio
+    if is_wav:
+        vocal_path = track.targets["vocals"].sources[0]
+        vocal = Sample.from_array(vocal_path, vocal_audio, rate)
+    else:
+        vocal_path = track.path[:-4] + "_vocals.wav"
+        vocal = write_wav_skip_existing(vocal_path, vocal_audio, rate)
+
+    # Add other instruments to form accompaniment
+    acc_audio = drums_audio + bass_audio + other_audio
+    if is_wav:
+        acc_path = os.path.join(os.path.dirname(track.path), "accompaniment.wav")
+    else:
+        acc_path = track.path[:-4] + "_accompaniment.wav"
+    acc = write_wav_skip_existing(acc_path, acc_audio, rate)
+
+    # Create mixture
+    mix_audio = track.audio
+    if is_wav :
+        mix_path = track.path
+        mix = Sample.from_array(mix_path, mix_audio, rate)
+    else:
+        mix_path = track.path[:-4] + "_mix.wav"
+        mix = write_wav_skip_existing(mix_path, mix_audio, rate)
+
+    diff_signal = np.abs(mix_audio - bass_audio - drums_audio - other_audio - vocal_audio)
+    
+    with _map_process_progress.get_lock():
+        _map_process_progress.value += 1
+    
+    # Collect all sources for now. Later on for SVS: [mix, acc, vocal] Multi-instrument: [mix, bass, drums, other, vocals]
+    return track.name, rate, np.max(diff_signal), np.mean(diff_signal), (mix, acc, bass, drums, other, vocal) 
+
+
+def getMUSDB(database_path, is_wav =False, setup_file=None, numthreads=5):
+
+    global _map_process_progress
+    mus = musdb.DB(root_dir=database_path, is_wav=is_wav, setup_file=setup_file)
 
     subsets = list()
 
+    rate = None
     for subset in ["train", "test"]:
+        _map_process_progress.value = 0
         tracks = mus.load_mus_tracks(subset)
+        tasks      = []
+        print("loaded", database_path, subset, len(tracks), musdb.__version__, file=sys.stderr)
         samples = list()
-
         for track in tracks:
-            rate = track.rate
-            # Get mix and instruments
-            # Bass
-            bass_path = track.path[:-4] + "_bass.wav"
-            bass_audio = track.targets["bass"].audio
-            bass = write_wav_skip_existing(bass_path, bass_audio, rate)
+            tasks.append((track, is_wav))
 
-            # Drums
-            drums_path = track.path[:-4] + "_drums.wav"
-            drums_audio = track.targets["drums"].audio
-            drums = write_wav_skip_existing(drums_path, drums_audio, rate)
+        print("start processing", subset, file=sys.stderr)
+        with Pool(numthreads) as pool :
+            results = pool.map_async(process_track, tasks)
+            while not results.ready():
+                cc = 0
+                with _map_process_progress.get_lock():
+                    cc = _map_process_progress.value
+                print("\r retriev MUS {0}:  {1:4d}/{2:4d}".format(subset, cc, len(tasks)),end="", file=sys.stderr)
+                sys.stdout.flush()
+                results.wait(1)
+            with _map_process_progress.get_lock():
+                cc = _map_process_progress.value
+            print("\r retriev MUS {0}:  {1:4d}/{2:4d}".format(subset, cc, len(tasks)), file=sys.stderr)
 
-            # Other
-            other_path = track.path[:-4] + "_other.wav"
-            other_audio = track.targets["other"].audio
-            other = write_wav_skip_existing(other_path, other_audio, rate)
+            for track_name, trate, max_diff, mean_diff, ss in results.get():
 
-            # Vocals
-            vocal_path = track.path[:-4] + "_vocals.wav"
-            vocal_audio = track.targets["vocals"].audio
-            vocal = write_wav_skip_existing(vocal_path, vocal_audio, rate)
+                if rate is None:
+                    rate = trate
+                elif rate != trate:
+                    raise RuntimeError('getMUSDB::error:inconsistent sample rate ins musdb {}: {} != {}'.format(
+                        track_name, trate, rate))
+                # Check if acc+vocals=mix
+                print("{0} dev from additivity constraint: {1:.6e}/{2:.6e}".format(track_name,max_diff, mean_diff),
+                          file=sys.stderr)
 
-            # Add other instruments to form accompaniment
-            acc_audio = drums_audio + bass_audio + other_audio
-            acc_path = track.path[:-4] + "_accompaniment.wav"
-            acc = write_wav_skip_existing(acc_path, acc_audio, rate)
+                # Collect all sources for now.
+                # Later on for SVS: [mix, acc, vocal]
+                #     and  for Multi-instrument: [mix, bass, drums, other, vocals]
+                samples.append(ss) 
 
-            # Create mixture
-            mix_path = track.path[:-4] + "_mix.wav"
-            mix_audio = track.audio
-            mix = write_wav_skip_existing(mix_path, mix_audio, rate)
+        subsets.append(samples)
+
+    return subsets
+
+def getMUSDB_augmented(database_path):
+
+    subsets = list()
+    
+    rate = None
+    for subset in ['train', 'test']:
+        for root, _, files in os.path.walk(os.path.join("database", sub_set)):            
+            if "voice.wav" in files:
+                bass_audio = drums_audio = vocal_audio = mix_audio = None
+                for file in files:
+                    if file == "bass.wav" :
+                        bass_path = os.path.join(root, file)
+                        bass_audio, sr, _ = sndio.read(bass_path)
+                    elif file == "drums.wav" :
+                        drums_path = os.path.join(root, file)
+                        drums_audio, sr, _ = sndio.read(drums_path)
+                    elif file == "rest.wav" :
+                        other_path = os.path.join(root, file)
+                        other_audio, sr, _ = sndio.read(other_path)
+                    elif file == "mix.wav" :
+                        mix_path = os.path.join(root, file)
+                        mix_audio, sr, _ = sndio.read(mix_path)
+                    elif file == "voice.wav" :
+                        vocal_path = os.path.join(root, file)
+                        vocal_audio, sr, _ = sndio.read(vocal_path)
+
+                        if rate is None:
+                            rate = sr
+                        else:
+                            if rate != sr:
+                                raise RuntimeError("getMUSDB_augmented::error::inconsistent sample rate in {} - {} != {}".
+                                                       fromat(root, rate,sr))
+                # Add other instruments to form accompaniment
+                acc_audio = drums_audio + bass_audio + other_audio
+                acc_path = os.path.join(local_path, os.path.basename(root), "accompaniment.wav")
+                acc = write_wav_skip_existing(acc_path, acc_audio, rate)
+
+                # Create mixture
+                if mix_audio is None:
+                    mix_path = os.path.join(local_path, os.path.basename(root), "mix.wav")
+                    mix_audio = acc_audio + vocal_audio
+                    mix = write_wav_skip_existing(mix_path, mix_audio, rate)
+                else:
+                    mix = Sample.from_array(mix_path, mix_audio, rate)
 
             diff_signal = np.abs(mix_audio - bass_audio - drums_audio - other_audio - vocal_audio)
             print("Maximum absolute deviation from source additivity constraint: " + str(np.max(diff_signal)))# Check if acc+vocals=mix
             print("Mean absolute deviation from source additivity constraint:    " + str(np.mean(diff_signal)))
 
-            samples.append((mix, acc, bass, drums, other, vocal)) # Collect all sources for now. Later on for SVS: [mix, acc, vocal] Multi-instrument: [mix, bass, drums, other, vocals]
+            # Collect all sources for now. Later on for
+            # SVS: [mix, acc, vocal]
+            # Multi-instrument: [mix, bass, drums, other, vocals]
+            samples.append((mix, acc, bass, drums, other, vocal)) 
 
         subsets.append(samples)
 

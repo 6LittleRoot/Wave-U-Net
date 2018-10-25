@@ -6,6 +6,7 @@ import matplotlib.ticker as ticker
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import os
+import sys
 import json
 import glob
 
@@ -32,14 +33,14 @@ def predict(track, model_config, load_model, results_dir=None):
         separator_class = Models.UnetAudioSeparator.UnetAudioSeparator(model_config["num_layers"], model_config["num_initial_filters"],
                                                                    output_type=model_config["output_type"],
                                                                    context=model_config["context"],
-                                                                   mono=model_config["mono_downmix"],
+                                                                   mono=(model_config["num_channels"]==1 or model_config["mono_downmix"]),
                                                                    upsampling=model_config["upsampling"],
                                                                    num_sources=model_config["num_sources"],
                                                                    filter_size=model_config["filter_size"],
                                                                    merge_filter_size=model_config["merge_filter_size"])
     elif model_config["network"] == "unet_spectrogram":
         separator_class = Models.UnetSpectrogramSeparator.UnetSpectrogramSeparator(model_config["num_layers"], model_config["num_initial_filters"],
-                                                                       mono=model_config["mono_downmix"],
+                                                                   mono=(model_config["num_channels"]==1 or model_config["mono_downmix"]),
                                                                        num_sources=model_config["num_sources"])
     else:
         raise NotImplementedError
@@ -53,7 +54,7 @@ def predict(track, model_config, load_model, results_dir=None):
 
     mix_context, sources = Input.get_multitrack_placeholders(sep_output_shape, model_config["num_sources"], sep_input_shape, "input")
 
-    print("Testing...")
+    print("Evaluating...", file=sys.stderr)
 
     # BUILD MODELS
     # Separator
@@ -66,9 +67,9 @@ def predict(track, model_config, load_model, results_dir=None):
     # Load model
     # Load pretrained model to continue training, if we are supposed to
     restorer = tf.train.Saver(None, write_version=tf.train.SaverDef.V2)
-    print("Num of variables" + str(len(tf.global_variables())))
+    print("Num of variables" + str(len(tf.global_variables())), file=sys.stderr)
     restorer.restore(sess, load_model)
-    print('Pre-trained model restored for song prediction')
+    print('Pre-trained model restored for song prediction', file=sys.stderr)
 
     mix_audio, orig_sr, mix_channels = track.audio, track.rate, track.audio.shape[1] # Audio has (n_samples, n_channels) shape
     separator_preds = predict_track(model_config, sess, mix_audio, orig_sr, sep_input_shape, sep_output_shape, separator_sources, mix_context)
@@ -98,7 +99,7 @@ def predict(track, model_config, load_model, results_dir=None):
         scores = museval.eval_mus_track(track, estimates, output_dir=results_dir)
 
         # print nicely formatted mean scores
-        print(scores)
+        print(scores, file=sys.stderr)
 
     # Close session, clear computational graph
     sess.close()
@@ -124,9 +125,9 @@ def predict_track(model_config, sess, mix_audio, mix_sr, sep_input_shape, sep_ou
     assert(len(mix_audio.shape) == 2)
     if model_config["mono_downmix"]:
         mix_audio = np.mean(mix_audio, axis=1, keepdims=True)
-    else:
-        if mix_audio.shape[1] == 1:# Duplicate channels if input is mono but model is stereo
-            mix_audio = np.tile(mix_audio, [1, 2])
+    elif mix_audio.shape[1] == 1 and model_config["num_channels"] > 1: 
+        # Duplicate channels if input is mono but model is stereo
+        mix_audio = np.tile(mix_audio, [1, 2])
     mix_audio = Utils.resample(mix_audio, mix_sr, model_config["expected_sr"])
 
     # Preallocate source predictions (same shape as input mixture)
@@ -137,7 +138,7 @@ def predict_track(model_config, sess, mix_audio, mix_sr, sep_input_shape, sep_ou
     output_time_frames = sep_output_shape[1]
 
     # Pad mixture across time at beginning and end so that neural network can make prediction at the beginning and end of signal
-    pad_time_frames = (input_time_frames - output_time_frames) / 2
+    pad_time_frames = (input_time_frames - output_time_frames) // 2
     mix_audio_padded = np.pad(mix_audio, [(pad_time_frames, pad_time_frames), (0,0)], mode="constant", constant_values=0.0)
 
     # Iterate over mixture magnitudes, fetch network rpediction
@@ -166,7 +167,7 @@ def produce_musdb_source_estimates(model_config, load_model, musdb_path, output_
     :param load_model: Model checkpoint path
     :return: 
     '''
-    print("Evaluating trained model saved at " + str(load_model)+ " on MUSDB and saving source estimate audio to " + str(output_path))
+    print("Evaluating trained model saved at " + str(load_model)+ " on MUSDB and saving source estimate audio to " + str(output_path), file=sys.stderr)
 
     mus = musdb.DB(root_dir=musdb_path)
     predict_fun = lambda track : predict(track, model_config, load_model, output_path)
@@ -182,7 +183,7 @@ def produce_source_estimates(model_config, load_model, input_path, output_path=N
     :param output_path: Output directory where estimated sources should be saved. Defaults to the same folder as the input file, if not given
     :return: Dictionary of source estimates containing the source signals as numpy arrays
     '''
-    print("Producing source estimates for input mixture file " + input_path)
+    print("Producing source estimates for input mixture file " + input_path, file=sys.stderr)
     # Prepare input audio as track object (in the MUSDB sense), so we can use the MUSDB-compatible prediction function
     audio, sr = Utils.load(input_path, sr=None, mono=False)
     # Create something that looks sufficiently like a track object to our MUSDB function
@@ -201,7 +202,7 @@ def produce_source_estimates(model_config, load_model, input_path, output_path=N
         # By default, set it to the input_path folder
         output_path = input_folder
     if not os.path.exists(output_path):
-        print("WARNING: Given output path " + output_path + " does not exist. Trying to create it...")
+        print("WARNING: Given output path " + output_path + " does not exist. Trying to create it...", file=sys.stderr)
         os.makedirs(output_path)
     assert(os.path.exists(output_path))
     for source_name, source_audio in sources_pred.items():
@@ -211,7 +212,7 @@ def compute_mean_metrics(json_folder, compute_averages=True):
     files = glob.glob(os.path.join(json_folder, "*.json"))
     sdr_inst_list = None
     for path in files:
-        #print(path)
+        #print(path, file=sys.stderr)
         with open(path, "r") as f:
             js = json.load(f)
 

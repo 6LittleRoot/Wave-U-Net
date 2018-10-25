@@ -1,9 +1,9 @@
 import tensorflow as tf
-
+import sys
 import Utils
 from Utils import LeakyReLU
 import numpy as np
-import OutputLayer
+from . import OutputLayer
 
 class UnetAudioSeparator:
     '''
@@ -29,11 +29,13 @@ class UnetAudioSeparator:
 
     def get_padding(self, shape):
         '''
-        Calculates the required amounts of padding along each axis of the input and output, so that the Unet works and has the given shape as output shape
+        Calculates the required amounts of padding along each axis of the input and output,
+        so that the Unet works and has the given shape as output shape
         :param shape: Desired output shape 
         :return: Input_shape, output_shape, where each is a list [batch_size, time_steps, channels]
         '''
 
+        print("get_padding", shape, file=sys.stderr)
         if self.context:
             # Check if desired shape is possible as output shape - go from output shape towards lowest-res feature map
             rem = float(shape[1]) # Cut off batch size number and channel
@@ -42,17 +44,18 @@ class UnetAudioSeparator:
                 rem = rem + self.merge_filter_size - 1
                 rem = (rem + 1.) / 2.# out = in + in - 1 <=> in = (out+1)/
 
+                
             # Round resulting feature map dimensions up to nearest integer
             x = np.asarray(np.ceil(rem),dtype=np.int64)
             assert(x >= 2)
-
+            
             # Compute input and output shapes based on lowest-res feature map
             output_shape = x
             input_shape = x
 
             # Extra conv
             input_shape = input_shape + self.filter_size - 1
-
+            print("get_shape feature map layer", x, file=sys.stderr)
             # Go from centre feature map through up- and downsampling blocks
             for i in range(self.num_layers):
                 output_shape = 2*output_shape - 1 #Upsampling
@@ -62,6 +65,7 @@ class UnetAudioSeparator:
                 input_shape = input_shape + self.filter_size - 1 # Conv
 
 
+            print("get_shape feature map layer:: inshape", input_shape, "outshape", output_shape, file=sys.stderr)
             input_shape = np.concatenate([[shape[0]], [input_shape], [self.num_channels]])
             output_shape = np.concatenate([[shape[0]], [output_shape], [self.num_channels]])
 

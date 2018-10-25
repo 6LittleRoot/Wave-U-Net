@@ -4,9 +4,10 @@ import warnings
 
 import librosa
 import numpy as np
-import skimage.io as io
 import tensorflow as tf
-from soundfile import SoundFile
+#from soundfile import SoundFile
+use_soundfile = False
+import pysndfile.sndio as sndio
 
 import Utils
 import Metadata
@@ -72,19 +73,28 @@ def randomPositionInAudio(audio_path, duration):
         return offset, duration
 
 def readWave(audio_path, start_frame, end_frame, mono=True, sample_rate=None, clip=True):
-    snd_file = SoundFile(audio_path, mode='r')
-    inf = snd_file._info
-    audio_sr = inf.samplerate
 
+    if use_soundfile:
+        snd_file = SoundFile(audio_path, mode='r')
+        inf = snd_file._info
+        audio_sr = inf.samplerate
+        frames = inf.frames
+    else:
+        audio_sr, _, _, frames, nchans = sndio.get_info(audio_path, extended_info=True)
     start_read = max(start_frame, 0)
     pad_front = -min(start_frame, 0)
-    end_read = min(end_frame, inf.frames)
-    pad_back = max(end_frame - inf.frames, 0)
+    end_read = min(end_frame, frames)
+    pad_back = max(end_frame - frames, 0)
 
-    snd_file.seek(start_read)
-    audio = snd_file.read(end_read - start_read, dtype='float32', always_2d=True) # (num_frames, channels)
-    snd_file.close()
-
+    if use_soundfile:
+        snd_file.seek(start_read)
+        audio = snd_file.read(end_read - start_read, dtype='float32', always_2d=True) # (num_frames, channels)
+        snd_file.close()
+    else:
+        audio, _, _ = sndio.read(audio_path, end=end_read, start=start_read, dtype=np.float32)
+        if audio.ndim == 1:
+            audio = audio[:,np.newaxis]
+            
     # Pad if necessary (start_frame or end_frame out of bounds)
     audio = np.pad(audio, [(pad_front, pad_back), (0, 0)], mode="constant", constant_values=0.0)
 
@@ -106,7 +116,8 @@ def readWave(audio_path, start_frame, end_frame, mono=True, sample_rate=None, cl
 
     return audio, audio_sr
 
-def readAudio(audio_path, offset=0.0, duration=None, mono=True, sample_rate=None, clip=True, pad_frames=0, metadata=None):
+def readAudio(audio_path, offset=0.0, duration=None, mono=True, sample_rate=None,
+                  clip=True, pad_frames=0, metadata=None):
     '''
     Reads an audio file wholly or partly, and optionally converts it to mono and changes sampling rate.
     By default, it loads the whole audio file. If the offset is set to None, the duration HAS to be not None,
@@ -183,9 +194,14 @@ def readAudio(audio_path, offset=0.0, duration=None, mono=True, sample_rate=None
 
     else: #Not an MP3: Handle with PySoundFile
         # open audio file
-        snd_file = SoundFile(audio_path, mode='r')
-        inf = snd_file._info
-        audio_sr = inf.samplerate
+        if use_soundfile:
+            snd_file = SoundFile(audio_path, mode='r')
+            inf = snd_file._info
+            snd_frames = inf.frames
+            audio_sr = inf.samplerate
+        else:
+            audio_sr, _, _, snd_frames, nchans = sndio.get_info(audio_path,
+                                                            extended_info=True)
 
         pad_orig_frames = pad_frames if sample_rate is None else int(np.ceil(float(pad_frames) * (float(audio_sr) / float(sample_rate))))
 
@@ -197,14 +213,14 @@ def readAudio(audio_path, offset=0.0, duration=None, mono=True, sample_rate=None
             read_frames = int(duration * float(audio_sr))
         elif offset is not None and duration is None:
             start_frame = int(offset * float(audio_sr))
-            read_frames = inf.frames - start_frame
+            read_frames = snd_frames - start_frame
         else:  # In this case, select random section of audio file
             assert (offset is None)
             assert (duration is not None)
             num_frames = int(duration * float(audio_sr))
-            max_start_pos = inf.frames - num_frames # Maximum start position when ignoring padding on both ends of the file
+            max_start_pos = snd_frames - num_frames # Maximum start position when ignoring padding on both ends of the file
             if (max_start_pos <= 0):  # If audio file is longer than duration of desired section, take all of it, will be padded later
-                print("WARNING: Audio file " + audio_path + " has frames  " + str(inf.frames) + " but is expected to be at least " + str(num_frames))
+                print("WARNING: Audio file " + audio_path + " has frames  " + str(snd_frames) + " but is expected to be at least " + str(num_frames))
                 raise Exception("Could not read minimum required amount of audio data")
                 #return Utils.load(audio_path, sample_rate, mono)  # Return whole audio file
             start_pos = np.random.randint(0, max_start_pos)  # Otherwise randomly determine audio section, taking padding on both sides into account
@@ -215,17 +231,21 @@ def readAudio(audio_path, offset=0.0, duration=None, mono=True, sample_rate=None
             end_mix_pos = start_mix_pos + num_mix_frames
 
             # Now see how much of the mixture is available, pad the rest with zeros
-
             start_frame = max(start_mix_pos, 0)
-            end_frame = min(end_mix_pos, inf.frames)
+            end_frame = min(end_mix_pos, snd_frames)
             read_frames = end_frame - start_frame
             pad_front_frames = -min(start_mix_pos, 0)
-            pad_back_frames = max(end_mix_pos - inf.frames, 0)
+            pad_back_frames = max(end_mix_pos - snd_frames, 0)
 
         assert(num_frames > 0)
-        snd_file.seek(start_frame)
-        audio = snd_file.read(read_frames, dtype='float32', always_2d=True)
-        snd_file.close()
+        if use_soundfile:
+            snd_file.seek(start_frame)
+            audio = snd_file.read(read_frames, dtype='float32', always_2d=True)
+            snd_file.close()
+        else:
+            audio, _, _ = sndio.read(audio_path, end=end_frame, start=start_frame, dtype=np.float32)
+            if audio.ndim == 1:
+                audio = audio[:,np.newaxis]
 
         centre_start_frame = start_pos
         centre_end_frame = start_pos + num_frames
@@ -477,6 +497,7 @@ def reconPhase(magnitude, fftWindowSize, hopSize, phaseIterations=10, initPhase=
     return audio
 
 def saveSpectrogramToImage(spectrogram, filePath):
+    import skimage.io as io
     image = np.clip((spectrogram - np.min(spectrogram)) / (np.max(spectrogram) - np.min(spectrogram)), 0, 1)
     # Ignore Low-contrast image warnings
     with warnings.catch_warnings():

@@ -4,6 +4,12 @@ import librosa
 from scipy.signal import resample_poly
 from fractions import gcd
 
+def get_path(source_or_str):
+    """
+    return path as str given a source or str path
+    """
+    return source_or_str if isinstance(source_or_str, str) else source_or_str.path
+
 def resample(audio, orig_sr, new_sr):
     orig_dtype = audio.dtype
     factor = gcd(orig_sr, new_sr)
@@ -109,7 +115,7 @@ def LeakyReLU(x, alpha=0.2):
 
 def load(path, sr=22050, mono=True, offset=0.0, duration=None, dtype=np.float32):
     # ALWAYS output (n_frames, n_channels) audio
-    y, orig_sr = librosa.load(path, None, mono, offset, duration, dtype)
+    y, orig_sr = librosa.load(get_path(path), None, mono, offset, duration, dtype)
     if len(y.shape) == 1:
         y = np.expand_dims(y, axis=0)
     y = y.T

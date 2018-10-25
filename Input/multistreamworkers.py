@@ -1,6 +1,9 @@
 import numpy as np
-import Input
+from . import Input
 from Sample import Sample
+
+def get_path(source_or_str):
+    return source_or_str if isinstance(source_or_str, str) else source_or_str.path
 
 class MultistreamWorker_GetSpectrogram:
     @staticmethod
@@ -92,7 +95,7 @@ class MultistreamWorker_GetSpectrogram:
             try:
                 if isinstance(item, Sample):  # Single audio file: Use metadata to read section from it
                     metadata = [item.sample_rate, item.channels, item.duration]
-                    audio, _, _, _ = Input.readAudio(item.path, offset=None, duration=options["duration"],
+                    audio, _, _, _ = Input.readAudio(get_path(item.path), offset=None, duration=options["duration"],
                                                      sample_rate=options["expected_sr"], pad_frames=options["pad_frames"],
                                                      metadata=metadata, mono=options["mono_downmix"])
                     #TF_rep, _ = Input.audioFileToSpectrogram(item.path, expected_sr=options["expected_sr"], offset=None,
@@ -117,7 +120,8 @@ class MultistreamWorker_GetSpectrogram:
                     #TODO under assumption that sources are additive we can only load sources in, then add them to form mixture!
                     file = item[0]
                     metadata = [file.sample_rate, file.channels, file.duration]
-                    mix_audio, mix_sr, source_start_frame, source_end_frame, start_read, end_read = Input.readAudio(file.path, offset=None, duration=options[ "duration"],
+                    mix_audio, mix_sr, source_start_frame, source_end_frame,\
+                      start_read, end_read = Input.readAudio(get_path(file.path), offset=None, duration=options[ "duration"],
                                                                                               sample_rate=options[ "expected_sr"],
                                                                                               pad_frames=options["pad_frames"],
                                                                                               metadata=metadata,
@@ -130,11 +134,12 @@ class MultistreamWorker_GetSpectrogram:
                         if isinstance(file, Sample):
                             #mag, _ = Input.audioFileToSpectrogram(file.path, expected_sr=options["expected_sr"], fftWindowSize=n_fft, hopSize=hop_length, buffer=True)
                             if options["augmentation"]:
-                                source_audio, _ = Input.readWave(file.path, start_read, end_read,
+                                source_audio, _ = Input.readWave(get_path(file.path), start_read, end_read,
                                                                  sample_rate=options["expected_sr"],
                                                                  mono=options["mono_downmix"])
                             else:
-                                source_audio, _ = Input.readWave(file.path, source_start_frame, source_end_frame, sample_rate=options["expected_sr"], mono=options["mono_downmix"])
+                                source_audio, _ = Input.readWave(get_path(file.path), source_start_frame,
+                                                                     source_end_frame, sample_rate=options["expected_sr"], mono=options["mono_downmix"])
                             #source_audio = Input.random_amplify(source_audio)
                             #mag, _ = Input.audioFileToSpectrogram(source_audio, fftWindowSize=n_fft, hopSize=hop_length)
                             #mag = mag[:, :options["output_shape"][2]]
@@ -168,8 +173,8 @@ class MultistreamWorker_GetSpectrogram:
 
                     communication_queue.put(sample)
             except Exception as e:
-                print(e)
-                print("Error while computing spectrogram. Skipping file.")
+                import traceback
+                print("Error while computing spectrogram. Skipping file.", str(e),traceback.format_exc())
 
 
         # This is necessary so that this process does not block. In particular, if there are elements still in the queue

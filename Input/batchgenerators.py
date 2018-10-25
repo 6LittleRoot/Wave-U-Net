@@ -2,8 +2,8 @@
 
 import numpy as np
 
-import multistreamcache
-import multistreamworkers
+from . import multistreamcache
+from . import multistreamworkers
 import Utils
 
 
@@ -95,7 +95,7 @@ class BatchGen_Paired:
         self.options["input_shape"] = input_shape
         self.options["output_shape"] = output_shape
         self.options["padding_duration"] = padding_duration
-        self.options["pad_frames"] = (input_shape[1] - output_shape[1]) / 2
+        self.options["pad_frames"] = (input_shape[1] - output_shape[1]) // 2
 
         # Internal Data Structures
         self.cache = multistreamcache.MultistreamCache(multistreamworkers.MultistreamWorker_GetSpectrogram.run,
