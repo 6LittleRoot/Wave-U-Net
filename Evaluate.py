@@ -172,7 +172,7 @@ def produce_musdb_source_estimates(model_config, load_model, musdb_path, output_
 
     mus = musdb.DB(root_dir=musdb_path, is_wav=is_wav, setup_file=setup_file)
     predict_fun = lambda track : predict(track, model_config, load_model, output_path)
-    assert(mus.test(predict_fun))
+    #assert(mus.test(predict_fun))
     mus.run(predict_fun, estimates_dir=output_path, subsets=subsets)
 
 def produce_source_estimates(model_config, load_model, input_path, output_path=None):
