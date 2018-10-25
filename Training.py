@@ -350,12 +350,16 @@ def run(cfg):
         else:
             gpu_id_locked=-1
             os.environ['CUDA_VISIBLE_DEVICES'] = ""
-        
-        sup_model_path, sup_loss = optimise(dataset=dataset)
-        print("Supervised training finished! Saved model at " + sup_model_path + ". Performance: " + str(sup_loss), file=sys.stderr)
+
+        if cfg['eval_model'] is None:
+            sup_model_path, sup_loss = optimise(dataset=dataset)
+            print("Supervised training finished! Saved model at " + sup_model_path + ". Performance: " + str(sup_loss), file=sys.stderr)
+        else:
+            sup_model_path = cfg['eval_model']
 
         # Evaluate trained model on MUSDB
-        Evaluate.produce_musdb_source_estimates(model_config, sup_model_path, model_config["musdb_path"], model_config["estimates_path"])
+        Evaluate.produce_musdb_source_estimates(model_config, sup_model_path, model_config["musdb_path"],
+                                                model_config["estimates_path"])
 
         if (gpu_id_locked >= 0):
             gpl.free_lock(gpu_id_locked)

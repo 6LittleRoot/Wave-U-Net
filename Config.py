@@ -62,7 +62,8 @@ def cfg():
                     }
     seed=1337
     experiment_id = np.random.randint(0,1000000)
-
+    # can be set on the command line to run evaluation of a checkpoint only
+    eval_model = None
     model_config["num_sources"] = 4 if model_config["task"] == "multi_instrument" else 2
     model_config["num_channels"] = 1 if model_config["mono_downmix"] else 2
 
