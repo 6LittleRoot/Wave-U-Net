@@ -359,7 +359,8 @@ def run(cfg):
 
         # Evaluate trained model on MUSDB
         Evaluate.produce_musdb_source_estimates(model_config, sup_model_path, model_config["musdb_path"],
-                                                model_config["estimates_path"])
+                                                model_config["estimates_path"], is_wav=True,
+                                                setup_file=model_config["musdb_setup"], subsets="test")
 
         if (gpu_id_locked >= 0):
             gpl.free_lock(gpu_id_locked)
