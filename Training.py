@@ -206,7 +206,7 @@ def optimise(model_config, experiment_id, dataset):
                 print("Performance on validation set improved from " + str(np.sqrt(best_loss)) + " to " + str(np.sqrt(curr_loss)), file=sys.stderr)
                 best_model_path = model_path
                 best_loss = curr_loss
-                for file in glob.glob(os.path.joint(best_model_path,".*")):
+                for file in glob.glob(os.path.join(best_model_path,".*")):
                     best_link_name = os.path.join(os.path.dirname(best_model_path), "best"+os.path.splitext(file)[-1])
                     # remove old link if it exists
                     if os.path.exists(best_link_name):
