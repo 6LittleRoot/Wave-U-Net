@@ -22,8 +22,8 @@ def cfg():
                     "use_CCMixter": False,
                     "model_base_dir" : "checkpoints", # Base folder for model checkpoints
                     "log_dir" : "logs", # Base folder for logs files
-                    "batch_size" : 128, # Batch size
-                    "max_epochs" : 100000, # Batch size
+                    "batch_size" : 64, # Batch size
+                    "max_epochs" : 200000, # Batch size
                     "gpu_device" : -1, # None -> CPU, -1 -> lock any free gpu
                     "init_sup_sep_lr" : 1e-4, # Supervised separator learning rate
                     "epoch_it" : 2000, # Number of supervised separator steps per epoch

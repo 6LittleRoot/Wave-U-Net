@@ -96,7 +96,6 @@ def train(model_config, experiment_id, sup_dataset, load_model=None):
     # BUILD MODELS
     # Separator
     separator_sources = separator_func(mix_context, True, not model_config["raw_audio_loss"], reuse=False) # Sources are output in order [acc, voice] for voice separation, [bass, drums, other, vocals] for multi-instrument separation
-
     # Supervised objective: MSE in log-normalized magnitude space
     separator_loss = 0
     for (real_source, sep_source) in zip(sources, separator_sources):
@@ -150,6 +149,7 @@ def train(model_config, experiment_id, sup_dataset, load_model=None):
     _global_step = sess.run(global_step)
     _init_step = _global_step
     last_disp_step = None
+    curr_time = time.time()
     while run:
         # TRAIN SEPARATOR
         sup_batch = sup_batch_gen.get_batch()
@@ -161,8 +161,11 @@ def train(model_config, experiment_id, sup_dataset, load_model=None):
         _global_step = sess.run(increment_global_step)
 
         if last_disp_step is None  or last_disp_step < _global_step -20:
-            print("it {0:d} RMSE loss {1:.5f}".format(_global_step, np.sqrt(sep_loss)), file=sys.stderr)
+            new_time=time.time()
+            print("it {0:d} RMSE loss {1:.5f} run time {2:.3f}".format(_global_step,
+                                                                       np.sqrt(sep_loss), new_time-curr_time), file=sys.stderr)
             last_disp_step = _global_step
+            curr_time =new_time
             sys.stderr.flush()
         if _global_step - _init_step > model_config["epoch_it"]:
             run = False
