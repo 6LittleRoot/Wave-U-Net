@@ -33,7 +33,7 @@ def cfg():
                     # Is specified in terms of output signal and has to be at least the output length of the network!
                     "duration" : 10,
                     'min_replacement_rate' : 16,  # roughly: how many cache entries to replace at least per batch on average. Can be fractional
-                    'num_layers' : 11, # How many U-Net layers
+                    'num_layers' : 12, # How many U-Net layers
                     # For Wave-U-Net: Filter size of conv in downsampling block
                     #'filter_size' : 15,
                     # reduced for 8000kHz srate
@@ -46,7 +46,7 @@ def cfg():
                     # when using valid padding)
                     #"num_frames": 16384,
                     # reduced due to reduced sample rate
-                    "num_frames": 9000,
+                    "num_frames": 6087,
                     'expected_sr': 8192,  # Downsample all audio input to this sampling rate
                     'mono_downmix': True,  # Whether to downsample the audio input
                     # Type of output layer, either "direct" or "difference". Direct output: Each source is result of tanh activation and independent. DIfference: Last source output is equal to mixture input - sum(all other sources)
