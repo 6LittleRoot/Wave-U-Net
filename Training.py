@@ -10,6 +10,7 @@ import manage_gpus as gpl
 import time
 import re
 import hashlib
+import glob
 
 import Datasets
 from Input import Input 
@@ -27,8 +28,7 @@ import Evaluate
 import functools
 from tensorflow.contrib.signal.python.ops import window_ops
 
-ex = Experiment('Waveunet Training', ingredients=[config_ingredient])
-
+ex = Experiment('Wave-UNet Training', ingredients=[config_ingredient])
 
 def get_gpu_lock(gpu_device_id, soft=False):
     gpu_id_locked=gpl.obtain_lock_id(id=gpu_device_id, hard=not soft)
@@ -149,7 +149,6 @@ def train(model_config, experiment_id, sup_dataset, load_model=None):
     run = True
     _global_step = sess.run(global_step)
     _init_step = _global_step
-    it = 0
     last_disp_step = None
     while run:
         # TRAIN SEPARATOR
@@ -196,7 +195,8 @@ def optimise(model_config, experiment_id, dataset):
             model_config["cache_size"] *= 2
             model_config["min_replacement_rate"] *= 2
             model_config["init_sup_sep_lr"] = 1e-5
-        while worse_epochs < model_config["worse_epochs"]: # Early stopping on validation set after a few epochs
+        # Early stopping on validation set after a few epochs
+        while worse_epochs < model_config["worse_epochs"] and epoch < model_config["max_epochs"]:
             print("EPOCH: " + str(epoch), file=sys.stderr)
             model_path = train(sup_dataset=dataset["train"], load_model=model_path)
             curr_loss = Test.test(model_config, model_folder=str(experiment_id), audio_list=dataset["valid"], load_model=model_path)
@@ -206,6 +206,18 @@ def optimise(model_config, experiment_id, dataset):
                 print("Performance on validation set improved from " + str(np.sqrt(best_loss)) + " to " + str(np.sqrt(curr_loss)), file=sys.stderr)
                 best_model_path = model_path
                 best_loss = curr_loss
+                for file in glob.glob(os.path.joint(best_model_path,".*")):
+                    best_link_name = os.path.join(os.path.dirname(best_model_path), "best"+os.path.splitext(file)[-1])
+                    # remove old link if it exists
+                    if os.path.exists(best_link_name):
+                        if not os.path.islink(best_link_name):
+                            raise RuntimeError(
+                                "{0} exists and is not a symlink, will not override existing files".format(best_link_name))
+                        else:
+                            print("remove", best_link_name)
+                            os.remove(best_link_name)
+                    # create link with relative path to original
+                    os.symlink(os.path.join(".", os.path.basename(file)), best_link_name)
             else:
                 worse_epochs += 1
                 print("Performance on validation set worsened to " + str(np.sqrt(curr_loss)), file=sys.stderr)
@@ -270,13 +282,46 @@ def run(cfg):
         # Draw random validation dataset from training dataset
         # filter valid, train and test datasets
         # valid needs to be first always as it wil be derived from the unfiltered train dataset
-        if keep_condition['valid']:
+        if keep_condition['valid'] is not None:
+            # selected validation examples matching the given pattern from training set
+            # remove all training samples that match the matched part of the validation path from
+            # the training set to avoid training with variants of the validation set
+            dsd_valid_cand = []
             print("prepare filtered validation datatset")
-            print ("original set of candidates:", len(dsd_train), file=sys.stderr)
-            dsd_valid_cand = [ii for ii, ss in enumerate(dsd_train) if keep_condition['valid'].match(Utils.get_path(ss[0].path))]
-            print ("filtered set of candidates set :", len(dsd_valid_cand), file=sys.stderr)
-            val_idx = np.random.choice(dsd_valid_cand, size=25, replace=False)
-            train_idx = [i for i in range(len(dsd_train)) if i not in val_idx]
+            print ("original set of validation candidates:", len(dsd_train), file=sys.stderr)
+            if keep_condition['valid'].groups==1:
+                if keep_condition['valid'].pattern[0] != "(":
+                    raise RuntimeError("run::valid filter::pattern group that will be "
+                                       "used to remove training examples need to be placed"
+                                       "at the beginning of the string valid patterns")
+
+                for ii, ss in enumerate(dsd_train):
+                    res = keep_condition['valid'].match(Utils.get_path(ss[0].path))
+                    if res is not None:
+                        dsd_valid_cand.append({"ind":ii, "start_path": res.groups()[0]})
+                print ("filtered set of valid candidates set :", len(dsd_valid_cand), file=sys.stderr)
+                val_cand_sel_idx=np.random.choice(len(dsd_valid_cand), size=25, replace=False)
+                val_idx = [dsd_valid_cand[ii]["ind"] for ii in val_cand_sel_idx]
+                val_path_start_list = [dsd_valid_cand[ii]["start_path"] for ii in val_cand_sel_idx]
+                train_idx = []
+                for ii, ss in enumerate(dsd_train):
+                    keep = True
+                    for valid_path_start in val_path_start_list:
+                        if Utils.get_path(ss[0].path).startswith(valid_path_start):
+                            keep = False
+                            break
+                    if keep :
+                        train_idx.append(ii)
+            elif keep_condition['valid'].groups==0:
+                dsd_valid_cand=[ii for ii, ss in enumerate(dsd_train) if
+                        keep_condition['valid'].match(Utils.get_path(ss[0].path))]
+                print ("filtered set of valid candidates set :", len(dsd_valid_cand), file=sys.stderr)
+                val_idx=np.random.choice(dsd_valid_cand, size=25, replace=False)
+                train_idx = [i for i in range(len(dsd_train)) if i not in val_idx]
+            else:
+                raise RuntimeError("run::valid filter::cannot handle more than a single group in valid patterns")
+            print("selected set of validation candidates:", len(dsd_train), file=sys.stderr)
+            print("selected set of validation candidates:", len(dsd_train), file=sys.stderr)
         else:
             val_idx = np.random.choice(len(dsd_train), size=25, replace=False)
             train_idx = [i for i in range(len(dsd_train)) if i not in val_idx]
@@ -286,7 +331,10 @@ def run(cfg):
         dataset["train"] = [dsd_train[i] for i in train_idx]
         dataset["valid"] = [dsd_train[i] for i in val_idx]
         dataset["test"]  = dsd_test
-            
+        print("datset sizes: train:{0:d}, valid:{1:d}, test:{2:d}".format(len(dataset['train']),
+                                                                          len(dataset['valid']),
+                                                                          len(dataset['test'])), file=sys.stderr)
+
         # MUSDB base dataset loaded now, now create task-specific dataset based on that
         if model_config["task"] == "multi_instrument":
             # Write multi instrument dataset
@@ -318,7 +366,7 @@ def run(cfg):
 
    # applyb train and test set filters
     for subset in ["train", "test"]:
-        if keep_condition[subset]:
+        if keep_condition[subset] is not None:
             print ("original", subset, "set:", len(dataset[subset]), file=sys.stderr)
             dataset[subset] = [ss for ss in dataset[subset] if keep_condition[subset].match(Utils.get_path(ss[0].path))]
             print ("filtered", subset, "set:", len(dataset[subset]), file=sys.stderr)
@@ -330,37 +378,39 @@ def run(cfg):
     # Each stem is a Sample object (see Sample class). Custom datasets can be fed by converting it to this data structure, then calling optimise
 
     # Optimize in a supervised fashion until validation loss worsens
-    if True:
-        gpu_device_id = None
-        # gpu_ids will be None on systems without gpu nvidia card
-        gpu_ids=gpl.board_ids()
-        if gpu_ids is not None:
-            if model_config["gpu_device"] == -1:
-                gpu_device_id = -1
-            elif model_config["gpu_device"] in gpu_ids:
-                gpu_device_id = model_config["gpu_device"]
-            else:
-                raise RuntimeError("train_onsets::error:: selected gpu device if {} is not free, select an id from {}".format(args.gpu_device, gpu_ids) )
-        elif model_config["gpu_device"] is not None :
-            raise RuntimeError("train_onsets::error:: no gpu devices available on thsi system, you cannot select a gpu")
-
-        # now we lock a GPU because we will need one
-        if gpu_device_id is not None:
-            gpu_id_locked = get_gpu_lock(gpu_device_id = gpu_device_id, soft=False)
+    gpu_device_id = None
+    # gpu_ids will be None on systems without gpu nvidia card
+    gpu_ids=gpl.board_ids()
+    if gpu_ids is not None:
+        if model_config["gpu_device"] == -1:
+            gpu_device_id = -1
+        elif model_config["gpu_device"] in gpu_ids:
+            gpu_device_id = model_config["gpu_device"]
         else:
-            gpu_id_locked=-1
-            os.environ['CUDA_VISIBLE_DEVICES'] = ""
+            raise RuntimeError("train_onsets::error:: selected gpu device if "
+                               "{} is not free, select an id from {}".format(model_config["gpu_device"], gpu_ids) )
+    elif model_config["gpu_device"] is not None :
+        raise RuntimeError("train_onsets::error:: no gpu devices available on thsi system, you cannot select a gpu")
 
-        if cfg['eval_model'] is None:
-            sup_model_path, sup_loss = optimise(dataset=dataset)
-            print("Supervised training finished! Saved model at " + sup_model_path + ". Performance: " + str(sup_loss), file=sys.stderr)
-        else:
-            sup_model_path = cfg['eval_model']
+    # now we lock a GPU because we will need one
+    if gpu_device_id is not None:
+        gpu_id_locked = get_gpu_lock(gpu_device_id = gpu_device_id, soft=False)
+    else:
+        gpu_id_locked=-1
+        os.environ['CUDA_VISIBLE_DEVICES'] = ""
 
-        # Evaluate trained model on MUSDB
-        Evaluate.produce_musdb_source_estimates(model_config, sup_model_path, model_config["musdb_path"],
-                                                model_config["estimates_path"], is_wav=True,
-                                                setup_file=model_config["musdb_setup"], subsets="test")
+    if cfg['eval_model'] is None:
+        sup_model_path, sup_loss = optimise(dataset=dataset)
+        print("Supervised training finished! Saved model at " + sup_model_path + ". Performance: " + str(sup_loss),
+              file=sys.stderr)
+    else:
+        sup_model_path = cfg['eval_model']
 
-        if (gpu_id_locked >= 0):
-            gpl.free_lock(gpu_id_locked)
+    # Evaluate trained model on MUSDB
+    Evaluate.produce_musdb_source_estimates(model_config, sup_model_path, model_config["musdb_path"],
+                                            os.path.join(model_config["estimates_path"],
+                                                         os.path.basename(sup_model_path)), is_wav=True,
+                                            setup_file=model_config["musdb_setup"], subsets="test")
+
+    if (gpu_id_locked >= 0):
+        gpl.free_lock(gpu_id_locked)

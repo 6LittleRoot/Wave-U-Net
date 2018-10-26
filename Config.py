@@ -11,7 +11,9 @@ def cfg():
                     # musdb setup_file, set to None to use default
                     "musdb_setup" : "mus_augmented.yaml",
                     # regular expressions hat are used to filter training, test and validation data
-                    "filter_data" : {"train" : None, "test": None, "valid" : ".*_orig/.*"},
+                    # training data will always be filtered to remove files that match the first match from the
+                    # validation filter pattern
+                    "filter_data" : {"train" : None, "test": None, "valid" : "(.*)_orig/.*"},
 
                     # SET THIS PATH TO WHERE YOU WANT SOURCE ESTIMATES PRODUCED BY THE TRAINED MODEL TO BE SAVED. Folder itself must exist!                        
                     "estimates_path" : "./Source_Estimates", 
@@ -20,7 +22,8 @@ def cfg():
                     "use_CCMixter": False,
                     "model_base_dir" : "checkpoints", # Base folder for model checkpoints
                     "log_dir" : "logs", # Base folder for logs files
-                    "batch_size" : 16, # Batch size
+                    "batch_size" : 128, # Batch size
+                    "max_epochs" : 100000, # Batch size
                     "gpu_device" : -1, # None -> CPU, -1 -> lock any free gpu
                     "init_sup_sep_lr" : 1e-4, # Supervised separator learning rate
                     "epoch_it" : 2000, # Number of supervised separator steps per epoch
