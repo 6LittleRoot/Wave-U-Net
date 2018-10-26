@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import sys
 from multiprocessing import Process, Queue, Event
 from numpy.random import randint, seed
 
@@ -40,9 +41,9 @@ class MultistreamCache():
             self.worker_handles.append(p)
 
         # Fill cache
-        print('----- Filling cache (Size: {}) -------'.format(self.cache_size))
+        print('----- Filling cache (Size: {}) -------'.format(self.cache_size), file=sys.stderr)
         for k in range(self.cache_size):
-            self.update_next_cache_item(self.communication_queue.get())
+            self.update_next_cache_item(self.communication_queue.get(), file=sys.stderr)
         print('----- Cache Filled -------')
 
         # We reset the update counter when starting the workers

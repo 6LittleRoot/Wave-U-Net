@@ -23,15 +23,17 @@ def cfg():
                     "model_base_dir" : "checkpoints", # Base folder for model checkpoints
                     "log_dir" : "logs", # Base folder for logs files
                     "batch_size" : 64, # Batch size
-                    "max_epochs" : 200000, # Batch size
+                    "max_epochs" : 100, # maximum number of epochs
                     "gpu_device" : -1, # None -> CPU, -1 -> lock any free gpu
                     "init_sup_sep_lr" : 1e-4, # Supervised separator learning rate
                     "epoch_it" : 2000, # Number of supervised separator steps per epoch
-                    'cache_size' : 16, # Number of audio excerpts that are cached to build batches from
+                    'cache_size' : 150, # Number of audio excerpts that are cached to build batches from
                     'num_workers' : 5, # Number of processes reading audio and filling up the cache
-                    "duration" : 2, # Duration in seconds of the audio excerpts in the cache. Has to be at least the output length of the network!
+                    # Duration in seconds of the audio excerpts in the cache.
+                    # Is specified in terms of output signal and has to be at least the output length of the network!
+                    "duration" : 10,
                     'min_replacement_rate' : 16,  # roughly: how many cache entries to replace at least per batch on average. Can be fractional
-                    'num_layers' : 12, # How many U-Net layers
+                    'num_layers' : 11, # How many U-Net layers
                     # For Wave-U-Net: Filter size of conv in downsampling block
                     #'filter_size' : 15,
                     # reduced for 8000kHz srate
@@ -44,7 +46,7 @@ def cfg():
                     # when using valid padding)
                     #"num_frames": 16384,
                     # reduced due to reduced sample rate
-                    "num_frames": 8192, 
+                    "num_frames": 9000,
                     'expected_sr': 8192,  # Downsample all audio input to this sampling rate
                     'mono_downmix': True,  # Whether to downsample the audio input
                     # Type of output layer, either "direct" or "difference". Direct output: Each source is result of tanh activation and independent. DIfference: Last source output is equal to mixture input - sum(all other sources)
