@@ -43,8 +43,8 @@ class MultistreamCache():
         # Fill cache
         print('----- Filling cache (Size: {}) -------'.format(self.cache_size), file=sys.stderr)
         for k in range(self.cache_size):
-            self.update_next_cache_item(self.communication_queue.get(), file=sys.stderr)
-        print('----- Cache Filled -------')
+            self.update_next_cache_item(self.communication_queue.get())
+        print('----- Cache Filled -------', file=sys.stderr)
 
         # We reset the update counter when starting the workers
         self.counter_cache_items_updated = 0
